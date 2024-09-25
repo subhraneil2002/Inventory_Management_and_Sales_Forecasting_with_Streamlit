@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 import matplotlib.pyplot as plt
-from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
+from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from xgboost import XGBRegressor
 import joblib  # For loading and saving the model
@@ -67,24 +67,42 @@ def create_lag_features(df, quantity_column='Quantity', lag_values=[1, 3, 6, 12]
     return df
 
 
-# Load the model (if pre-trained) or train it
+# Load the pre-trained model or train it using GridSearchCV
 @st.cache_resource
 def load_or_train_model(X_train, y_train, retrain=False):
-    model_path = "xgboost_model.pkl"
+    model_path = "xgboost_tuned_model.pkl"
 
     if not retrain:
         try:
             model = joblib.load(model_path)
-            st.success("Model loaded successfully.")
+            st.success("Pre-trained model loaded successfully.")
             return model
         except FileNotFoundError:
             st.warning("No pre-trained model found, training a new model.")
 
-    model = XGBRegressor(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=42)
-    model.fit(X_train, y_train)
-    joblib.dump(model, model_path)
-    st.success("Model trained and saved successfully.")
-    return model
+    # Define the XGBoost model
+    xgb_model = XGBRegressor()
+
+    # Define the hyperparameter grid
+    param_grid = {
+        'n_estimators': [500, 1000],
+        'max_depth': [3, 5],
+        'learning_rate': [0.01, 0.05, 0.1],
+        'subsample': [0.8, 0.9]
+    }
+
+    # Use GridSearchCV to find the best hyperparameters
+    grid_search = GridSearchCV(estimator=xgb_model, param_grid=param_grid, cv=3, scoring='neg_mean_squared_error',
+                               n_jobs=-1, verbose=2)
+
+    # Fit the model
+    grid_search.fit(X_train, y_train)
+    best_model = grid_search.best_estimator_
+
+    # Save the best model
+    joblib.dump(best_model, model_path)
+    st.success("Model trained with GridSearchCV and saved successfully.")
+    return best_model
 
 
 # Main function to drive the Streamlit app
@@ -111,8 +129,11 @@ def main():
                 # Load or train the model
                 model = load_or_train_model(X_train, y_train, retrain=False)
 
-                # Display results or forecasts
-                st.write("Model ready to make predictions")
+                if model is not None:
+                    # Display results or forecasts
+                    st.write("Model ready to make predictions")
+                else:
+                    st.error("Model could not be loaded.")
 
 
 if __name__ == '__main__':
