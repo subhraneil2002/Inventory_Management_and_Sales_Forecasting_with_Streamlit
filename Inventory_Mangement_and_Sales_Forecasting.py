@@ -74,7 +74,7 @@ def tune_xgboost(X_train, y_train):
 
     xgb_model = XGBRegressor(objective='reg:squarederror')
     xgb_grid_search = GridSearchCV(xgb_model, xgb_param_grid, cv=tscv, scoring='neg_mean_squared_error', verbose=1)
-    xgb_grid_search.fit(X_train, y_train)
+    xgb_grid_search.fit(X, y)
 
     return xgb_grid_search.best_estimator_, xgb_grid_search.best_params_
 
