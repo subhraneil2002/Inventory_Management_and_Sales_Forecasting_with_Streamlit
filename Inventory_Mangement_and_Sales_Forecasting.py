@@ -17,12 +17,8 @@ def load_data(file_path):
             return df
         except UnicodeDecodeError:
             st.warning(f"Failed to read CSV file using encoding: {encoding}")
+    st.error("Unable to read CSV file with any of the common encodings.")
     return None
-
-
-def extract_columns(df):
-    required_columns = ['Year', 'Month', 'Quantity', 'Material Description']
-    return df[required_columns]
 
 
 def clean_dataframe(df):
@@ -34,6 +30,7 @@ def clean_dataframe(df):
         st.error("The required columns are missing from the data.")
         return None
 
+    # Convert Quantity column to an integer type, handling any commas
     df['Quantity'] = df['Quantity'].astype(str).str.replace(',', '').astype(float).astype(int)
     return df
 
@@ -79,37 +76,29 @@ def tune_xgboost(X, y):
     return xgb_grid_search.best_estimator_, xgb_grid_search.best_params_
 
 
-def forecast_next_year(model, last_known, last_date, num_months=12, feature_names=None):
+def forecast_next_year(model, last_known, num_months=12, feature_names=None):
     forecast = []
-    actuals = []
 
-    for _ in range(num_months):
-        # Ensure that the DataFrame for prediction has the correct feature names
+    # Forecasting for the fiscal year: April 2024 to March 2025
+    for i in range(num_months):
+        # Convert last_known to a DataFrame with the correct feature names
         last_known_df = pd.DataFrame([last_known], columns=feature_names)
 
         # Predict the next value
         next_pred = model.predict(last_known_df)
-        forecast.append(np.ceil(next_pred[0]))
+        forecast.append(np.ceil(next_pred[0]))  # Apply ceiling to the forecasted value
 
-        # Store the actual value for comparison (if available)
-        actual_value = last_known[0]  # Assuming last known value is treated as an actual value
-        actuals.append(actual_value)
+        # Update the lag features and moving averages
+        last_known = np.roll(last_known, -1)  # Shift the lag features
+        last_known[-6:] = np.append(last_known[-5:], next_pred)  # Update lags and moving average
 
-        # Update the last_known array for the next iteration
-        last_known = np.roll(last_known, -1)
-        last_known[-1] = next_pred[0]
-
-    # Generate future dates starting from the last known date
-    future_dates = pd.date_range(start=last_date + pd.DateOffset(months=1), periods=num_months, freq='MS')
-
-    # Calculate MAE and MSE
-    mae = mean_absolute_error(actuals, forecast[:len(actuals)])
-    mse = mean_squared_error(actuals, forecast[:len(actuals)])
+    # Create forecast dates starting from April 2024
+    forecast_dates = pd.date_range(start='2024-04-01', periods=num_months, freq='MS')
 
     # Create the forecast series with the future dates as the index
-    forecast_series = pd.Series(forecast, index=future_dates)
+    forecast_series = pd.Series(forecast, index=forecast_dates)
 
-    return forecast_series, mae, mse
+    return forecast_series
 
 
 def plot_forecast(forecast, work_order):
@@ -158,21 +147,14 @@ if uploaded_file:
                     # Train the model
                     model, best_params = tune_xgboost(X, y)
 
-                    # Get the last date from the data
-                    last_date = lag_data.index[-1]
-
                     # Use the last known values to predict future sales
                     last_known = X.iloc[-1].values
-                    forecast_series, mae, mse = forecast_next_year(model, last_known, last_date, feature_names=feature_names)
+                    forecast_series = forecast_next_year(model, last_known, num_months=12, feature_names=feature_names)
 
                     # Display the forecast
                     st.write(f"Forecast for {work_order}:")
                     for month, quantity in forecast_series.items():
                         st.write(f"{month.strftime('%B %Y')}: {int(quantity)}")
-
-                    # Display MAE and MSE
-                    st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
-                    st.write(f"Mean Squared Error (MSE): {mse:.2f}")
 
                     # Plot the forecast
                     plot_forecast(forecast_series, work_order)
