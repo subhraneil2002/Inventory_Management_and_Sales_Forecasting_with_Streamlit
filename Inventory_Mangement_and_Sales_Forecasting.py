@@ -63,7 +63,7 @@ def create_lag_features(df, quantity_column='Quantity', lag_values=[1, 3, 6, 12]
     return df
 
 
-def tune_xgboost(X_train, y_train):
+def tune_xgboost(X, y):
     tscv = TimeSeriesSplit(n_splits=5)
     xgb_param_grid = {
         'n_estimators': [500, 1000],
@@ -81,6 +81,7 @@ def tune_xgboost(X_train, y_train):
 
 def forecast_next_year(model, last_known, last_date, num_months=12, feature_names=None):
     forecast = []
+    actuals = []
 
     for _ in range(num_months):
         # Ensure that the DataFrame for prediction has the correct feature names
@@ -90,6 +91,10 @@ def forecast_next_year(model, last_known, last_date, num_months=12, feature_name
         next_pred = model.predict(last_known_df)
         forecast.append(np.ceil(next_pred[0]))
 
+        # Store the actual value for comparison (if available)
+        actual_value = last_known[0]  # Assuming last known value is treated as an actual value
+        actuals.append(actual_value)
+
         # Update the last_known array for the next iteration
         last_known = np.roll(last_known, -1)
         last_known[-1] = next_pred[0]
@@ -97,8 +102,14 @@ def forecast_next_year(model, last_known, last_date, num_months=12, feature_name
     # Generate future dates starting from the last known date
     future_dates = pd.date_range(start=last_date + pd.DateOffset(months=1), periods=num_months, freq='MS')
 
+    # Calculate MAE and MSE
+    mae = mean_absolute_error(actuals, forecast[:len(actuals)])
+    mse = mean_squared_error(actuals, forecast[:len(actuals)])
+
     # Create the forecast series with the future dates as the index
-    return pd.Series(forecast, index=future_dates)
+    forecast_series = pd.Series(forecast, index=future_dates)
+
+    return forecast_series, mae, mse
 
 
 def plot_forecast(forecast, work_order):
@@ -152,12 +163,16 @@ if uploaded_file:
 
                     # Use the last known values to predict future sales
                     last_known = X.iloc[-1].values
-                    forecast_series = forecast_next_year(model, last_known, last_date, feature_names=feature_names)
+                    forecast_series, mae, mse = forecast_next_year(model, last_known, last_date, feature_names=feature_names)
 
                     # Display the forecast
                     st.write(f"Forecast for {work_order}:")
                     for month, quantity in forecast_series.items():
                         st.write(f"{month.strftime('%B %Y')}: {int(quantity)}")
+
+                    # Display MAE and MSE
+                    st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
+                    st.write(f"Mean Squared Error (MSE): {mse:.2f}")
 
                     # Plot the forecast
                     plot_forecast(forecast_series, work_order)
